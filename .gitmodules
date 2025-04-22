@@ -1,0 +1,3 @@
+[submodule "linguaspark/3rd_party/bergamot-translator"]
+	path = linguaspark/3rd_party/bergamot-translator
+	url = https://github.com/browsermt/bergamot-translator.git

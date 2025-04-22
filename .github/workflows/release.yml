@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      update_latest:
+        description: "Update latest release"
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          platforms: linux/amd64
+          tags: linguaspark-builder:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract compiled libraries from Docker container
+        run: |
+          mkdir -p artifacts
+          docker create --name temp-container linguaspark-builder:latest
+          docker cp temp-container:/build/liblinguaspark.so ./artifacts/
+          docker cp temp-container:/build/libiomp5.so ./artifacts/
+          docker rm temp-container
+
+          cd artifacts
+          tar -czvf linguaspark-x86_64-linux.tar.gz liblinguaspark.so libiomp5.so
+          cd ..
+
+      - name: Get version information
+        id: get_version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.update_latest }}" == "true" ]]; then
+            LATEST_TAG=$(git describe --tags --abbrev=0)
+            echo "VERSION=${LATEST_TAG#v}" >> $GITHUB_OUTPUT
+            echo "TAG_NAME=latest" >> $GITHUB_OUTPUT
+            echo "IS_LATEST=true" >> $GITHUB_OUTPUT
+          else
+            VERSION=${GITHUB_REF#refs/tags/v}
+            echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+            echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "IS_LATEST=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          tag_name: ${{ steps.get_version.outputs.IS_LATEST == 'true' && 'latest' || github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/linguaspark-x86_64-linux.tar.gz
