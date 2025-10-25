@@ -2,7 +2,20 @@ cmake_minimum_required(VERSION 3.15...4.0)
 
 project(linguaspark CXX C)
 
-option(USE_MKL "Compile with MKL support" ON)
+# --- 修改部分 ---
+# 根据系统架构智能设置 USE_MKL 的默认值
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+  message(STATUS "Detected ARM64 architecture, disabling MKL support by default.")
+  set(USE_MKL_DEFAULT OFF)
+else()
+  message(STATUS "Detected non-ARM64 architecture, enabling MKL support by default.")
+  set(USE_MKL_DEFAULT ON)
+endif()
+
+# 使用动态计算出的默认值来定义选项
+option(USE_MKL "Compile with MKL support" ${USE_MKL_DEFAULT})
+# --- 修改结束 ---
+
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
