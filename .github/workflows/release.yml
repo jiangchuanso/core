@@ -13,10 +13,12 @@ on:
         type: boolean
 
 jobs:
-  build-and-release:
+  # 这个作业使用矩阵策略，为每个目标架构并行构建和打包库
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -27,27 +29,47 @@ jobs:
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker image
+      - name: Build Docker image for ${{ matrix.arch }}
         uses: docker/build-push-action@v6
         with:
           context: .
           push: false
-          load: true
-          platforms: linux/amd64
-          tags: linguaspark-builder:latest
+          load: true # 将镜像加载到宿主机，以便后续提取文件
+          platforms: linux/${{ matrix.arch }}
+          tags: linguaspark-builder-${{ matrix.arch }}:latest
 
       - name: Extract compiled libraries from Docker container
         run: |
           mkdir -p artifacts
-          docker create --name temp-container linguaspark-builder:latest
+          docker create --name temp-container linguaspark-builder-${{ matrix.arch }}:latest
           docker cp temp-container:/build/liblinguaspark.so ./artifacts/
-          docker cp temp-container:/build/libiomp5.so ./artifacts/
+
+          # 根据架构复制正确的 OpenMP 运行时库
+          if [ "${{ matrix.arch }}" = "amd64" ]; then
+            echo "---- Copying Intel OpenMP library (libiomp5.so) for amd64 ----"
+            docker cp temp-container:/build/libiomp5.so ./artifacts/
+            tar -czvf linguaspark-x86_64-linux.tar.gz -C artifacts liblinguaspark.so libiomp5.so
+          else
+            echo "---- Copying GCC OpenMP library (libgomp.so.1) for arm64 ----"
+            docker cp temp-container:/build/libgomp.so.1 ./artifacts/
+            tar -czvf linguaspark-aarch64-linux.tar.gz -C artifacts liblinguaspark.so libgomp.so.1
+          fi
+          
           docker rm temp-container
 
-          cd artifacts
-          tar -czvf linguaspark-x86_64-linux.tar.gz liblinguaspark.so libiomp5.so
-          cd ..
+      - name: Upload artifact for ${{ matrix.arch }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact-${{ matrix.arch }}
+          path: linguaspark-*.tar.gz
 
+  # 这个作业等待所有构建作业完成后，收集所有产物并创建 GitHub Release
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
       - name: Get version information
         id: get_version
         run: |
@@ -55,18 +77,23 @@ jobs:
             LATEST_TAG=$(git describe --tags --abbrev=0)
             echo "VERSION=${LATEST_TAG#v}" >> $GITHUB_OUTPUT
             echo "TAG_NAME=latest" >> $GITHUB_OUTPUT
-            echo "IS_LATEST=true" >> $GITHUB_OUTPUT
           else
             VERSION=${GITHUB_REF#refs/tags/v}
             echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
             echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-            echo "IS_LATEST=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts # 所有构建产物将被下载到此目录
+          merge-multiple: true     # 将所有产物合并到单个目录中
 
       - name: Create or update GitHub Release
         uses: ncipollo/release-action@v1
         with:
           name: Release ${{ steps.get_version.outputs.VERSION }}
-          tag: ${{ steps.get_version.outputs.IS_LATEST == 'true' && 'latest' || github.ref_name }}
+          tag: ${{ steps.get_version.outputs.TAG_NAME }}
           allowUpdates: true
-          artifacts: "artifacts/linguaspark-x86_64-linux.tar.gz"
+          # 上传下载目录中所有匹配的 tar.gz 文件
+          artifacts: "release-artifacts/*.tar.gz"
