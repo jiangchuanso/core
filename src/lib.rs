@@ -226,6 +226,12 @@ impl Drop for Translator {
     }
 }
 
+// --- 修改部分 ---
+
+// 这个函数是一个针对 Intel MKL 在非 Intel CPU (如 AMD) 上的性能优化技巧。
+// 它只在 x86/x86_64 架构上有意义，因此我们使用条件编译来确保它只在这些平台上被包含。
+// 对于 ARM64 等其他架构，这个函数会被完全忽略，避免了不兼容的问题。
+#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
 #[doc(hidden)]
 #[unsafe(no_mangle)]
 pub extern "C" fn mkl_serv_intel_cpu_true() -> i32 {
