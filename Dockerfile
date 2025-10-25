@@ -31,22 +31,34 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
 WORKDIR /app/linguaspark
 COPY . /app
 
-# 3. 根据目标架构设置构建参数并运行 CMake
+# --- 修改部分 ---
+
+# 为后续的 RUN 指令显式使用 bash，因为 Intel 的 setvars.sh 脚本可能需要它
+SHELL ["/bin/bash", "-c"]
+
+ARG TARGETARCH
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
-        # x86_64 配置
-        export BUILD_ARCH="x86-64"; \
-        export MKLROOT="/opt/intel/oneapi/mkl/latest"; \
-        source /opt/intel/oneapi/setvars.sh; \
+        echo "---- Building for x86_64 ----" && \
+        export BUILD_ARCH="x86-64" && \
+        export MKLROOT="/opt/intel/oneapi/mkl/latest" && \
+        # 使用 '.' 代替 'source' 以获得更好的兼容性，两者在 bash 中等价
+        . /opt/intel/oneapi/setvars.sh && \
+        cmake -B build -S . \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_ARCH=${BUILD_ARCH} \
+              -DCMAKE_CXX_FLAGS_RELEASE="-Wno-deprecated-declarations" && \
+        cmake --build build -j$(nproc); \
     else \
-        # ARM64 配置
-        export BUILD_ARCH="aarch64"; \
-    fi && \
-    echo "---- CMake Build Arch: ${BUILD_ARCH} ----" && \
-    cmake -B build -S . \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DBUILD_ARCH=${BUILD_ARCH} \
-          -DCMAKE_CXX_FLAGS_RELEASE="-Wno-deprecated-declarations" && \
-    cmake --build build -j$(nproc)
+        echo "---- Building for aarch64 ----" && \
+        export BUILD_ARCH="aarch64" && \
+        cmake -B build -S . \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_ARCH=${BUILD_ARCH} \
+              -DCMAKE_CXX_FLAGS_RELEASE="-Wno-deprecated-declarations" && \
+        cmake --build build -j$(nproc); \
+    fi
+
+# --- 修改结束 ---
 
 # 4. 复制构建产物和对应的运行时依赖
 RUN mkdir -p /build && \
@@ -63,5 +75,3 @@ RUN mkdir -p /build && \
         cp /usr/lib/${LIB_PATH}/libgomp.so.1 /build/ || \
         echo "Warning: Could not find libgomp.so.1. The final image might be missing an OpenMP runtime."; \
     fi
-
-# 最终的构建产物在 /build 目录中
