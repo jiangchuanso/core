@@ -1,33 +1,26 @@
-# 使用一个已经安装了 oneAPI 的基础镜像
-# 例如: intel/oneapi-basekit:latest
+# 1. 使用正确的基础镜像
 FROM intel/oneapi-basekit:latest
 
 WORKDIR /src
 
-# 1. 安装系统依赖 (假设是 Debian/Ubuntu)
+# 2. 安装所有必需的构建工具
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
-    git \
-    # 在这里添加你的项目需要的其他 -dev 包
-    # e.g., libboost-all-dev \
+    # 在这里添加你的项目需要的其他依赖，比如 libboost-all-dev
     && rm -rf /var/lib/apt/lists/*
 
-# 2. 复制源代码
+# 3. 复制源代码
 COPY . .
 
-# 3. 设置 oneAPI 环境并运行 CMake 配置
-#    将其拆分为单独的 RUN 指令，便于调试和缓存
+# 4. 执行构建（现在应该能找到 cmake 和 setvars.sh 了）
 RUN source /opt/intel/oneapi/setvars.sh && \
     cmake -B build -S . \
     -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_ARCH=x86-64 \
-    -DCMAKE_CXX_FLAGS_RELEASE="-Wno-deprecated-declarations"
-
-# 4. 执行编译
-RUN source /opt/intel/oneapi/setvars.sh && \
+    -DCMAKE_CXX_FLAGS_RELEASE="-Wno-deprecated-declarations" && \
     cmake --build build -j4
-
+    
 # 5. 准备输出目录并复制文件
 #    使用更稳健的方式查找和复制依赖库
 RUN mkdir -p /build && \
